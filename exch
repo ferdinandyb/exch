@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+
+import argparse
+from datetime import datetime, timedelta
+from pathlib import Path
+from pprint import pprint
+
+import plotext as plt
+import yaml
+from numpy import array
+
+apilayer = yaml.load(
+    open(Path.home() / ".config/apilayer/config.yaml"), Loader=yaml.Loader
+)
+APIKEY = apilayer["apikey"]
+BASEURL = f"{apilayer['baseurl']}/fixer"
+
+import requests as r
+
+
+def conv(d):
+    return d.isoformat().split("T")[0]
+
+
+def getConversion(f, t, d):
+    if d is None:
+        res = r.get(
+            f"{BASEURL}/convert",
+            headers={"apikey": APIKEY},
+            params={"from": f, "to": t, "amount": 1},
+        ).json()["info"]
+        print(f'1 {f} = {res["rate"]} {t}')
+    else:
+        today = datetime.now()
+        target = conv(today - timedelta(days=int(d)))
+        res = r.get(
+            f"{BASEURL}/{target}",
+            headers={"apikey": APIKEY},
+            params={"from": f, "symbols": t},
+        ).json()["rates"][t]
+        print(f"1 {f} = {res} {t} (on {target})")
+
+
+def plotRate(f, t, d):
+    if d is None:
+        d = 365
+    else:
+        d = int(d)
+        if d > 365:
+            d = 365
+    end = datetime.now()
+    start = end - timedelta(days=d)
+    res = r.get(
+        f"{BASEURL}/timeseries",
+        headers={"apikey": APIKEY},
+        params={
+            "base": f,
+            "symbols": t,
+            "start_date": conv(start),
+            "end_date": conv(end),
+        },
+    ).json()["rates"]
+    dates = []
+    values = []
+    for key, val in res.items():
+        dates.append(key)
+        values.append(val[t])
+    dates = array(dates)
+    values = array(values)
+    indices = dates.argsort()
+    dates = dates[indices]
+    values = values[indices]
+    plt.date_form("Y-m-d")
+    plt.limit_size(True, False)
+    plt.plot_size(None, 20)
+    plt.theme("dark")
+    plt.plot(dates, values)
+    plt.title(f"{f} - {t}")
+    plt.show()
+
+
+def getSymbols():
+    res = r.get(
+        f"{BASEURL}/symbols",
+        headers={"apikey": APIKEY},
+    ).json()["symbols"]
+    pprint(res)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-f", "--from", type=str, default="EUR", dest="f")
+    parser.add_argument("-t", "--to", type=str, default="HUF")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-p", "--plot", action="store_true")
+    group.add_argument("-s", "--symbols", action="store_true")
+    parser.add_argument("-d", "--days-ago")
+    args = parser.parse_args()
+
+    if args.plot:
+        plotRate(args.f, args.to, args.days_ago)
+    elif args.symbols:
+        getSymbols()
+    else:
+        getConversion(args.f, args.to, args.days_ago)
